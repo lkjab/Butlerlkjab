@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import os
 import json
 import re
@@ -19,7 +18,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 
 claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = None  # Lazy load
+
+def get_supabase():
+    """Lazy load Supabase client on first use"""
+    global supabase
+    if supabase is None:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return supabase
 
 app = FastAPI(title="Personal Assistant Bot")
 
@@ -28,7 +34,7 @@ app = FastAPI(title="Personal Assistant Bot")
 def get_memories(user_id: str) -> list[str]:
     """Fetch all memories for a user"""
     try:
-        response = supabase.table("memories").select("content").eq("user_id", user_id).execute()
+        response = get_supabase().table("memories").select("content").eq("user_id", user_id).execute()
         return [m["content"] for m in response.data] if response.data else []
     except Exception as e:
         print(f"Error fetching memories: {e}")
@@ -37,7 +43,7 @@ def get_memories(user_id: str) -> list[str]:
 def save_memory(user_id: str, content: str) -> bool:
     """Save a new memory (ignores duplicates)"""
     try:
-        supabase.table("memories").insert({
+        get_supabase().table("memories").insert({
             "user_id": user_id,
             "content": content
         }).execute()
@@ -49,7 +55,7 @@ def save_memory(user_id: str, content: str) -> bool:
 def get_pending_reminders(user_id: str) -> list[dict]:
     """Get all unfired reminders for a user"""
     try:
-        response = supabase.table("reminders").select("*").eq("user_id", user_id).is_("fired_at", "null").execute()
+        response = get_supabase().table("reminders").select("*").eq("user_id", user_id).is_("fired_at", "null").execute()
         return response.data if response.data else []
     except Exception as e:
         print(f"Error fetching reminders: {e}")
@@ -64,7 +70,7 @@ def save_reminder(user_id: str, message: str, delay_ms: int = None) -> bool:
             # Default to 1 hour from now if no time specified
             fire_time = datetime.utcnow() + timedelta(hours=1)
         
-        supabase.table("reminders").insert({
+        get_supabase().table("reminders").insert({
             "user_id": user_id,
             "message": message,
             "fire_at": fire_time.isoformat()
